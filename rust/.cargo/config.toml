@@ -1,0 +1,22 @@
+# Android cross-compile linker/ar wiring. Set NDK path via env; the shim
+# scripts in tool/ do that for you.
+#
+# These linker names resolve inside the Android NDK's prebuilt toolchain:
+#   $NDK/toolchains/llvm/prebuilt/<host>/bin/
+# `cargo-ndk` or the build_rust.sh helper exposes them on PATH.
+
+[target.aarch64-linux-android]
+ar = "llvm-ar"
+linker = "aarch64-linux-android24-clang"
+
+[target.armv7-linux-androideabi]
+ar = "llvm-ar"
+linker = "armv7a-linux-androideabi24-clang"
+
+[target.x86_64-linux-android]
+ar = "llvm-ar"
+linker = "x86_64-linux-android24-clang"
+
+[target.i686-linux-android]
+ar = "llvm-ar"
+linker = "i686-linux-android24-clang"

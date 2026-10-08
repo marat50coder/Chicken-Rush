@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Warm asphalt backdrop so the icon's rounded corners read as a frame
+         and the Android 12+ splash blends into the launcher art. -->
+    <color name="launch_bg">#C85A1F</color>
+    <color name="launch_page">#2B2B2B</color>
+</resources>

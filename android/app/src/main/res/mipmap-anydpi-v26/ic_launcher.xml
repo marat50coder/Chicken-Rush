@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hand-written adaptive icon shared with the Android 12+ splash. See
+     drawable-anydpi-v26/ic_splash_logo.xml. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/launch_bg" />
+    <foreground>
+        <inset
+            android:drawable="@drawable/ic_launcher_art"
+            android:inset="14%" />
+    </foreground>
+</adaptive-icon>
