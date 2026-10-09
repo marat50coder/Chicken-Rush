@@ -156,7 +156,22 @@ class MeshTelemetry {
           'af_sub3=${flat['af_sub3']} '
           'deep_link_value=${flat['deep_link_value']} '
           'all_keys=${flat.keys.toList()}');
-      _resolveInstall();
+
+      // Organic rescue — if AppsFlyer sent `Organic` on the first
+      // callback but a OneLink click was observed by AF (there IS a
+      // deep-link URL in Android intent), delay the install-ready
+      // resolve so the UDL `onDeepLinking` callback has time to land
+      // and overlay. SkyLadder uses the same trick (then hits GCD
+      // HTTP endpoint for a true rescue). Without this the pilot
+      // sends a half-empty body and the partner site shows red subs.
+      final isOrganic = (flat['af_status']?.toString() ?? '') == 'Organic';
+      if (isOrganic && _deepLinkRaw.isEmpty) {
+        diag('MeshTelemetry',
+            'GCD Organic — delaying resolve ${FabricPlan.organicRescueDelay.inSeconds}s for UDL merge');
+        Future.delayed(FabricPlan.organicRescueDelay, _resolveInstall);
+      } else {
+        _resolveInstall();
+      }
     } catch (e, st) {
       diag('MeshTelemetry', '_handleInstall error $e\n$st');
       _resolveInstall();
@@ -174,6 +189,12 @@ class MeshTelemetry {
   /// Normalise AppsFlyer payload. The Flutter plugin wraps data as
   /// `{status, payload: {...fields...}}`; older shapes use `data`; some
   /// deliver flat. Normalise all three.
+  ///
+  /// IMPORTANT: unlike earlier versions, this does NOT drop Map/List
+  /// values. SkyLadder (the reference) forwards everything verbatim —
+  /// filtering them here caused partner sites to miss sub_ids when
+  /// AF occasionally delivered them wrapped. Collection values are
+  /// kept as-is so DecreeFetch can jsonEncode them cleanly.
   Map<String, dynamic> _flatten(dynamic payload) {
     if (payload is! Map) return const <String, dynamic>{};
     Map? src;
@@ -189,8 +210,13 @@ class MeshTelemetry {
     final out = <String, dynamic>{};
     src.forEach((k, v) {
       if (v == null) return;
-      if (v is Map || v is List) return;
-      out[k.toString()] = v;
+      // Keep strings/nums/bools as-is; collapse collections to JSON
+      // text so the sealed Rust pack doesn't choke on nested maps.
+      if (v is String || v is num || v is bool) {
+        out[k.toString()] = v;
+      } else {
+        out[k.toString()] = jsonEncode(_jsonSafe(v));
+      }
     });
     return out;
   }
