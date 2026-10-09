@@ -90,8 +90,21 @@ class MeshTelemetry {
 
   Future<void> _handleGcd(dynamic payload) async {
     try {
+      assert(() {
+        // ignore: avoid_print
+        print('[MeshTelemetry] raw payload runtimeType=${payload.runtimeType} '
+            'topKeys=${payload is Map ? payload.keys.toList() : null}');
+        return true;
+      }());
       final flat = _flatten(payload);
-      if (flat.isEmpty) return;
+      if (flat.isEmpty) {
+        assert(() {
+          // ignore: avoid_print
+          print('[MeshTelemetry] GCD flatten returned empty — payload=$payload');
+          return true;
+        }());
+        return;
+      }
 
       final afId = _afId ??
           flat['af_id'] ??
@@ -130,17 +143,29 @@ class MeshTelemetry {
     }
   }
 
-  /// AppsFlyer delivers the conversion map either flat (fields at the top)
-  /// or wrapped as `{status, type, data:{...}}`. Normalise both.
+  /// Normalise the AppsFlyer callback payload. The Flutter plugin
+  /// (appsflyer_sdk 6.x) wraps the conversion fields in a Map shaped like
+  /// `{status: "...", payload: {...actual fields...}}` — the real data is
+  /// one level down under `payload`. Older/alternative shapes use `data`
+  /// or deliver flat. Normalise all three.
   Map<String, String> _flatten(dynamic payload) {
     final out = <String, String>{};
+    if (payload is! Map) return out;
     Map? src;
-    if (payload is Map) {
-      final inner = payload['data'];
-      src = (inner is Map) ? inner : payload;
+    final p = payload['payload'];
+    final d = payload['data'];
+    if (p is Map) {
+      src = p;
+    } else if (d is Map) {
+      src = d;
+    } else {
+      src = payload;
     }
-    src?.forEach((k, v) {
-      if (v != null) out[k.toString()] = v.toString();
+    src.forEach((k, v) {
+      if (v == null) return;
+      // Skip nested maps/lists — only primitive conversion fields.
+      if (v is Map || v is List) return;
+      out[k.toString()] = v.toString();
     });
     return out;
   }
