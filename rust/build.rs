@@ -164,7 +164,7 @@ fn main() {
         (20, af_dev_key.as_bytes()),      // AppsFlyer dev key
         (21, fb_proj_num.as_bytes()),     // Firebase project number
         (22, b"https://gcdsdk.appsflyer.com/install_data/v4.0/"),
-        (23, b"chickenrush.onelink.me"),
+        (23, b"chickenrusn.onelink.me"),
 
         // JS enhancer bodies — custom per project (rule
         // webview_safe_area_injection.mdc). We only neutralise CSS vars +
