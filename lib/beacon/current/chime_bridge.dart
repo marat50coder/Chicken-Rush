@@ -42,8 +42,26 @@ class ChimeBridge {
     if (!fabricCredentialsLive) return;
     if (_ready) return;
     try {
-      await Firebase.initializeApp();
-    } catch (_) {/* already init */}
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp();
+      }
+      assert(() {
+        // ignore: avoid_print
+        print('[ChimeBridge] firebase apps='
+            '${Firebase.apps.map((a) => a.options.projectId).toList()}');
+        return true;
+      }());
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[ChimeBridge] Firebase.initializeApp failed: $e');
+        return true;
+      }());
+      return;
+    }
+    try {
+      await FirebaseMessaging.instance.setAutoInitEnabled(true);
+    } catch (_) {}
 
     const androidInit = AndroidInitializationSettings('ic_notification');
     await _local.initialize(
@@ -106,8 +124,40 @@ class ChimeBridge {
       final granted = s.authorizationStatus == AuthorizationStatus.authorized
           || s.authorizationStatus == AuthorizationStatus.provisional;
       await AnchorVault.instance.markPermissionGranted(granted);
+      assert(() {
+        // ignore: avoid_print
+        print('[ChimeBridge] requestOptIn status=${s.authorizationStatus} '
+            'alert=${s.alert} sound=${s.sound} granted=$granted');
+        return true;
+      }());
+      // After a fresh grant, (re)fetch the token so the backend has it.
+      if (granted && (_lastToken == null || _lastToken!.isEmpty)) {
+        try {
+          final t = await FirebaseMessaging.instance.getToken();
+          if (t != null && t.isNotEmpty) {
+            _lastToken = t;
+            await AnchorVault.instance.storeAttribution(pushToken: t);
+            assert(() {
+              // ignore: avoid_print
+              print('[ChimeBridge] post-grant token=$t');
+              return true;
+            }());
+          }
+        } catch (e) {
+          assert(() {
+            // ignore: avoid_print
+            print('[ChimeBridge] post-grant getToken error $e');
+            return true;
+          }());
+        }
+      }
       return granted;
-    } catch (_) {
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[ChimeBridge] requestOptIn error $e');
+        return true;
+      }());
       return false;
     }
   }

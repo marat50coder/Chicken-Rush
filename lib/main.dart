@@ -21,11 +21,11 @@ Future<void> main() async {
     systemNavigationBarContrastEnforced: false,
   ));
 
-  // Register the top-level FCM background handler before runApp.
-  // The call is a no-op if the gate is dormant (no Firebase init).
+  // Boot ChimeBridge BEFORE runApp so Firebase + the top-level FCM
+  // background handler are live before any widget mounts. Idempotent —
+  // ChimeDock will await it again on Accept.
   if (credentialsReady) {
     try {
-      // Importing the pragma'd function pulls it into the entry-point graph.
       await ChimeBridge.instance.boot();
     } catch (_) {/* dormant */}
   }

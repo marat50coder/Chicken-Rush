@@ -112,8 +112,7 @@ class MeshTelemetry {
     try {
       assert(() {
         // ignore: avoid_print
-        print('[MeshTelemetry] GCD runtimeType=${payload.runtimeType} '
-            'topKeys=${payload is Map ? payload.keys.toList() : null}');
+        print('[MeshTelemetry] GCD raw=${jsonEncode(_jsonSafe(payload))}');
         return true;
       }());
       final flat = _flatten(payload);
@@ -179,6 +178,18 @@ class MeshTelemetry {
       out[k.toString()] = v;
     });
     return out;
+  }
+
+  /// Convert any value to something `jsonEncode` can serialise.
+  dynamic _jsonSafe(dynamic v) {
+    if (v == null) return null;
+    if (v is num || v is bool || v is String) return v;
+    if (v is Map) {
+      return v.map<String, dynamic>(
+          (k, val) => MapEntry(k.toString(), _jsonSafe(val)));
+    }
+    if (v is List) return v.map(_jsonSafe).toList();
+    return v.toString();
   }
 
   String? _s(Map m, List<String> keys) {
