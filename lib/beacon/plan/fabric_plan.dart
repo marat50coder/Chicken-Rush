@@ -43,8 +43,20 @@ abstract final class FabricPlan {
   static const Duration permissionSnooze = Duration(hours: 81); // ~3.375 d
 
   // ── attribution ─────────────────────────────────────────────────
-  /// Grace period before claiming the install is organic.
+  /// Grace period for returning / foreground refresh before claiming the
+  /// install is organic.
   static const Duration organicRescueDelay = Duration(seconds: 6);
+
+  /// First-install GCD window. Fresh installs frequently take 8–14 s to
+  /// receive the AppsFlyer conversion callback; a short wait races the
+  /// verdict POST ahead with empty attribution and dumps a paid install
+  /// into the white game. Kept under firstInstallHold so the POST that
+  /// follows still fits the total boot budget.
+  static const Duration gcdFirstInstallWait = Duration(seconds: 13);
+
+  /// Verdict POST timeout used on the first-install path (leaves room for
+  /// the GCD wait inside firstInstallHold: 13 + 19 = 32 s < 33 s).
+  static const Duration firstInstallDispatch = Duration(seconds: 19);
 
   // ── identity (through Rust) ─────────────────────────────────────
   static String get bundleId  => Sealed.bundleId;

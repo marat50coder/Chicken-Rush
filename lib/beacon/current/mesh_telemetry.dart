@@ -3,12 +3,17 @@
 // Three jobs:
 //   1. Start the SDK with the sealed dev-key.
 //   2. Collect the GCD (Get Conversion Data) callback into breadcrumbs.
-//   3. Provide an "organic rescue": if GCD hasn't fired within
-//      FabricPlan.organicRescueDelay, we proceed with whatever we have
-//      (usually empty / "Organic").
+//   3. Provide an "organic rescue": if GCD hasn't fired within the wait
+//      budget, proceed with whatever we have (usually empty / "Organic").
 //
 // If the sealed dev-key is empty (gate dormant) we return a stub that
 // never touches the SDK.
+//
+// ⚠️ Callback registration order matters: onInstallConversionData /
+// onAppOpenAttribution MUST be attached BEFORE initSdk(), otherwise a
+// fresh install can deliver the conversion payload before our handler
+// exists and the attribution is lost — which routes a paid install into
+// the white game. (See the 2026-10 OneLink non-organic regression.)
 
 import 'dart:async';
 
@@ -25,9 +30,13 @@ class MeshTelemetry {
   AppsflyerSdk? _sdk;
   Completer<Map<String, String>>? _gcd;
   String? _afId;
+  bool _booted = false;
 
   Future<void> boot() async {
     if (!fabricCredentialsLive) return;
+    if (_booted) return;
+    _booted = true;
+
     final opt = AppsFlyerOptions(
       afDevKey: Sealed.afDevKey,
       appId: Sealed.bundleId,
@@ -38,6 +47,30 @@ class MeshTelemetry {
     );
     _sdk = AppsflyerSdk(opt);
     _gcd = Completer<Map<String, String>>();
+
+    // Attach callbacks BEFORE initSdk so a cold-install GCD can't slip
+    // through before the handler is live.
+    _sdk!.onInstallConversionData((data) {
+      _handleGcd(data);
+    });
+    _sdk!.onAppOpenAttribution((data) {
+      _handleGcd(data);
+    });
+    _sdk!.onDeepLinking((DeepLinkResult res) {
+      try {
+        final dl = res.deepLink;
+        if (dl != null) {
+          final flat = <String, String>{};
+          final dv = dl.deepLinkValue;
+          if (dv != null && dv.isNotEmpty) flat['deep_link_value'] = dv;
+          final clickId = dl.clickHttpReferrer;
+          if (clickId != null) flat['click_http_referrer'] = clickId;
+          unawaited(AnchorVault.instance
+              .storeAttribution(deepLink: flat['deep_link_value']));
+        }
+      } catch (_) {}
+    });
+
     try {
       await _sdk!.initSdk(
         registerConversionDataCallback: true,
@@ -45,36 +78,51 @@ class MeshTelemetry {
         registerOnDeepLinkingCallback: true,
       );
     } catch (_) {
-      _gcd!.complete(const <String, String>{});
+      if (_gcd?.isCompleted == false) {
+        _gcd!.complete(const <String, String>{});
+      }
       return;
     }
     try {
       _afId = await _sdk!.getAppsFlyerUID();
     } catch (_) {}
-    _sdk!.onInstallConversionData((data) async {
-      await _handleGcd(data);
-    });
-    _sdk!.onAppOpenAttribution((data) async {
-      await _handleGcd(data);
-    });
   }
 
   Future<void> _handleGcd(dynamic payload) async {
     try {
-      final map = (payload is Map) ? payload : (payload['data'] as Map?);
-      if (map == null) return;
-      final flat = <String, String>{};
-      map.forEach((k, v) {
-        if (v != null) flat[k.toString()] = v.toString();
-      });
-      flat['af_id'] = _afId ?? flat['appsflyer_id'] ?? '';
+      final flat = _flatten(payload);
+      if (flat.isEmpty) return;
+
+      final afId = _afId ??
+          flat['af_id'] ??
+          flat['appsflyer_id'] ??
+          '';
+      flat['af_id'] = afId;
+
       await AnchorVault.instance.storeAttribution(
-        mediaSource: flat['media_source'] ?? flat['pid'],
-        campaign:    flat['campaign'],
-        campaignId:  flat['campaign_id'],
-        afId:        flat['af_id'],
+        mediaSource: _firstNonEmpty(flat, ['media_source', 'pid']),
+        campaign:    _firstNonEmpty(flat, ['campaign', 'c']),
+        campaignId:  _firstNonEmpty(flat, ['campaign_id', 'af_c_id', 'af_cid']),
+        afId:        afId.isEmpty ? null : afId,
+        gaid:        _firstNonEmpty(flat, ['advertising_id', 'gaid', 'android_id']),
+        deepLink:    _firstNonEmpty(flat, ['deep_link_value', 'deep_link_sub1']),
       );
-      if (_gcd?.isCompleted == false) _gcd!.complete(flat);
+
+      final status = (flat['af_status'] ?? '').toLowerCase();
+      final hasAttr = (flat['media_source'] ?? '').isNotEmpty ||
+          status == 'non-organic';
+      if (_gcd?.isCompleted == false) {
+        _gcd!.complete(hasAttr ? flat : const <String, String>{});
+      }
+
+      assert(() {
+        // Debug-only: visible in `flutter run`, stripped from release.
+        // ignore: avoid_print
+        print('[MeshTelemetry] GCD status=$status '
+            'media_source=${flat['media_source']} '
+            'campaign_id=${flat['campaign_id']}');
+        return true;
+      }());
     } catch (_) {
       if (_gcd?.isCompleted == false) {
         _gcd!.complete(const <String, String>{});
@@ -82,16 +130,40 @@ class MeshTelemetry {
     }
   }
 
-  /// Wait for GCD up to [FabricPlan.organicRescueDelay] then return
-  /// whatever we have. If the gate is dormant returns immediately.
-  Future<Map<String, String>> awaitBreadcrumbs() async {
+  /// AppsFlyer delivers the conversion map either flat (fields at the top)
+  /// or wrapped as `{status, type, data:{...}}`. Normalise both.
+  Map<String, String> _flatten(dynamic payload) {
+    final out = <String, String>{};
+    Map? src;
+    if (payload is Map) {
+      final inner = payload['data'];
+      src = (inner is Map) ? inner : payload;
+    }
+    src?.forEach((k, v) {
+      if (v != null) out[k.toString()] = v.toString();
+    });
+    return out;
+  }
+
+  String? _firstNonEmpty(Map<String, String> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v != null && v.isNotEmpty && v != 'null') return v;
+    }
+    return null;
+  }
+
+  /// Wait for GCD up to [maxWait] then return whatever has been stored.
+  /// First installs pass a generous window (attribution is make-or-break);
+  /// returning sessions pass a short one.
+  Future<Map<String, String>> awaitBreadcrumbs({Duration? maxWait}) async {
+    final budget = maxWait ?? FabricPlan.organicRescueDelay;
     if (!fabricCredentialsLive || _gcd == null) {
       return AnchorVault.instance.readAttribution();
     }
     try {
-      final rc = await _gcd!.future.timeout(FabricPlan.organicRescueDelay);
-      if (rc.isNotEmpty) return AnchorVault.instance.readAttribution();
-    } on TimeoutException {/* fall through */}
+      await _gcd!.future.timeout(budget);
+    } on TimeoutException {/* organic / slow — fall through */}
     return AnchorVault.instance.readAttribution();
   }
 }

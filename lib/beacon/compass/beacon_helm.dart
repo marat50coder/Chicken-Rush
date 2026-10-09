@@ -62,22 +62,44 @@ class BeaconHelm {
       }
     }
 
-    // Fresh decision path.
-    final breadcrumbs = await MeshTelemetry.instance.awaitBreadcrumbs();
-    final hold = isFirst
-        ? FabricPlan.firstInstallHold
-        : FabricPlan.returningHold;
+    // Fresh decision path. Wait for the AppsFlyer conversion callback —
+    // a generous window on first install (attribution is make-or-break),
+    // a short one for returning sessions.
+    final breadcrumbs = await MeshTelemetry.instance.awaitBreadcrumbs(
+      maxWait: isFirst
+          ? FabricPlan.gcdFirstInstallWait
+          : FabricPlan.organicRescueDelay,
+    );
+    final postTimeout = isFirst
+        ? FabricPlan.firstInstallDispatch
+        : FabricPlan.decreeDispatch;
+
+    assert(() {
+      // ignore: avoid_print
+      print('[BeaconHelm] isFirst=$isFirst '
+          'media_source=${breadcrumbs['media_source']} '
+          'campaign_id=${breadcrumbs['campaign_id']} '
+          'af_id=${breadcrumbs['af_id']}');
+      return true;
+    }());
 
     Decree? decree;
     try {
       decree = await DecreeFetch.instance
           .ask(isFirstLaunch: isFirst, breadcrumbs: breadcrumbs)
-          .timeout(hold);
+          .timeout(postTimeout);
     } on TimeoutException {
       decree = null;
     } catch (_) {
       decree = null;
     }
+
+    assert(() {
+      // ignore: avoid_print
+      print('[BeaconHelm] decree openWeb=${decree?.openWeb} '
+          'url=${decree?.url} valid=${decree?.valid}');
+      return true;
+    }());
 
     await AnchorVault.instance.markBooted();
 
