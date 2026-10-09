@@ -30,10 +30,10 @@ dependencies:
   shared_preferences_android: ^2.4.14
   app_links: ^6.4.1
 
-  firebase_core: ^4.1.1
-  firebase_messaging: ^16.0.3
-  firebase_app_check: ^0.4.2
-  flutter_local_notifications: ^19.4.2
+  firebase_core: ^4.11.0
+  firebase_messaging: ^16.4.1
+  firebase_app_check: ^0.4.5+1
+  flutter_local_notifications: ^22.1.0
 
   appsflyer_sdk: ^6.17.2
   flutter_secure_storage: ^10.0.0-beta.4

@@ -66,7 +66,7 @@ class ChimeBridge {
 
     const androidInit = AndroidInitializationSettings('ic_notification');
     await _local.initialize(
-      const InitializationSettings(android: androidInit),
+      settings: const InitializationSettings(android: androidInit),
       onDidReceiveNotificationResponse: _onLocalTap,
     );
     diag('ChimeBridge', 'local notif plugin initialized');
@@ -190,10 +190,10 @@ class ChimeBridge {
           ? BigTextStyleInformation(n.body ?? '') : null,
     );
     await _local.show(
-      n.hashCode & 0x7FFFFFFF,
-      n.title ?? 'Chicken Rush',
-      n.body ?? '',
-      NotificationDetails(android: android),
+      id: n.hashCode & 0x7FFFFFFF,
+      title: n.title ?? 'Chicken Rush',
+      body: n.body ?? '',
+      notificationDetails: NotificationDetails(android: android),
       payload: msg.data.isNotEmpty ? jsonEncode(msg.data) : null,
     );
     _publishUrl(msg);
