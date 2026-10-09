@@ -15,6 +15,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../prism/diag.dart';
 import '../plan/fabric_plan.dart';
 import 'anchor_vault.dart';
 
@@ -39,35 +40,36 @@ class ChimeBridge {
   String? get lastToken => _lastToken;
 
   Future<void> boot() async {
-    if (!fabricCredentialsLive) return;
+    diag('ChimeBridge',
+        'boot() enter credentialsLive=$fabricCredentialsLive ready=$_ready');
+    if (!fabricCredentialsLive) {
+      diag('ChimeBridge', 'boot() SKIPPED — gate dormant');
+      return;
+    }
     if (_ready) return;
     try {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp();
       }
-      assert(() {
-        // ignore: avoid_print
-        print('[ChimeBridge] firebase apps='
-            '${Firebase.apps.map((a) => a.options.projectId).toList()}');
-        return true;
-      }());
-    } catch (e) {
-      assert(() {
-        // ignore: avoid_print
-        print('[ChimeBridge] Firebase.initializeApp failed: $e');
-        return true;
-      }());
+      diag('ChimeBridge',
+          'firebase apps=${Firebase.apps.map((a) => a.options.projectId).toList()}');
+    } catch (e, st) {
+      diag('ChimeBridge', 'Firebase.initializeApp FAILED $e\n$st');
       return;
     }
     try {
       await FirebaseMessaging.instance.setAutoInitEnabled(true);
-    } catch (_) {}
+      diag('ChimeBridge', 'setAutoInitEnabled(true) OK');
+    } catch (e) {
+      diag('ChimeBridge', 'setAutoInitEnabled error $e');
+    }
 
     const androidInit = AndroidInitializationSettings('ic_notification');
     await _local.initialize(
       const InitializationSettings(android: androidInit),
       onDidReceiveNotificationResponse: _onLocalTap,
     );
+    diag('ChimeBridge', 'local notif plugin initialized');
 
     final chan = AndroidNotificationChannel(
       FabricPlan.notifChannelId,
@@ -79,44 +81,61 @@ class ChimeBridge {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(chan);
+    diag('ChimeBridge',
+        'android channel created id=${FabricPlan.notifChannelId}');
 
     FirebaseMessaging.onBackgroundMessage(chimeBackgroundSink);
     FirebaseMessaging.onMessage.listen(_onForeground);
     FirebaseMessaging.onMessageOpenedApp.listen(_onLaunchFromPush);
+    diag('ChimeBridge', 'FCM listeners wired (bg/fg/opened)');
+
+    // Current permission status BEFORE requesting — on a fresh install
+    // this is `notDetermined`; on re-launch it tells us if user denied.
+    try {
+      final cur = await FirebaseMessaging.instance.getNotificationSettings();
+      diag('ChimeBridge',
+          'current permission=${cur.authorizationStatus} '
+          'alert=${cur.alert} sound=${cur.sound} badge=${cur.badge}');
+    } catch (e) {
+      diag('ChimeBridge', 'getNotificationSettings error $e');
+    }
 
     try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         _lastToken = token;
         await AnchorVault.instance.storeAttribution(pushToken: token);
-        assert(() {
-          // ignore: avoid_print
-          print('[ChimeBridge] fcm token=${token.substring(0,
-              token.length < 24 ? token.length : 24)}…');
-          return true;
-        }());
+        diag('ChimeBridge', 'fcm token=$token');
+      } else {
+        diag('ChimeBridge', 'fcm token=NULL (permission not granted yet?)');
       }
-    } catch (e) {
-      assert(() {
-        // ignore: avoid_print
-        print('[ChimeBridge] getToken error $e');
-        return true;
-      }());
+    } catch (e, st) {
+      diag('ChimeBridge', 'getToken ERROR $e\n$st');
     }
     FirebaseMessaging.instance.onTokenRefresh.listen((t) async {
       _lastToken = t;
       await AnchorVault.instance.storeAttribution(pushToken: t);
+      diag('ChimeBridge', 'onTokenRefresh new=$t');
     });
 
     // If the app was cold-launched by a push, surface its URL.
     final initial = await FirebaseMessaging.instance.getInitialMessage();
-    if (initial != null) _publishUrl(initial);
+    if (initial != null) {
+      diag('ChimeBridge',
+          'cold-boot push data=${initial.data} notif=${initial.notification?.title}');
+      _publishUrl(initial);
+    }
 
     _ready = true;
+    diag('ChimeBridge', 'boot() done — ready=true');
   }
 
   Future<bool> requestOptIn() async {
-    if (!fabricCredentialsLive) return false;
+    diag('ChimeBridge', 'requestOptIn() enter');
+    if (!fabricCredentialsLive) {
+      diag('ChimeBridge', 'requestOptIn SKIPPED — gate dormant');
+      return false;
+    }
     try {
       final s = await FirebaseMessaging.instance.requestPermission(
         alert: true, badge: true, sound: true,
@@ -124,12 +143,9 @@ class ChimeBridge {
       final granted = s.authorizationStatus == AuthorizationStatus.authorized
           || s.authorizationStatus == AuthorizationStatus.provisional;
       await AnchorVault.instance.markPermissionGranted(granted);
-      assert(() {
-        // ignore: avoid_print
-        print('[ChimeBridge] requestOptIn status=${s.authorizationStatus} '
-            'alert=${s.alert} sound=${s.sound} granted=$granted');
-        return true;
-      }());
+      diag('ChimeBridge',
+          'requestOptIn status=${s.authorizationStatus} '
+          'alert=${s.alert} sound=${s.sound} badge=${s.badge} granted=$granted');
       // After a fresh grant, (re)fetch the token so the backend has it.
       if (granted && (_lastToken == null || _lastToken!.isEmpty)) {
         try {
@@ -137,39 +153,27 @@ class ChimeBridge {
           if (t != null && t.isNotEmpty) {
             _lastToken = t;
             await AnchorVault.instance.storeAttribution(pushToken: t);
-            assert(() {
-              // ignore: avoid_print
-              print('[ChimeBridge] post-grant token=$t');
-              return true;
-            }());
+            diag('ChimeBridge', 'post-grant token=$t');
+          } else {
+            diag('ChimeBridge', 'post-grant token=NULL');
           }
-        } catch (e) {
-          assert(() {
-            // ignore: avoid_print
-            print('[ChimeBridge] post-grant getToken error $e');
-            return true;
-          }());
+        } catch (e, st) {
+          diag('ChimeBridge', 'post-grant getToken ERROR $e\n$st');
         }
       }
       return granted;
-    } catch (e) {
-      assert(() {
-        // ignore: avoid_print
-        print('[ChimeBridge] requestOptIn error $e');
-        return true;
-      }());
+    } catch (e, st) {
+      diag('ChimeBridge', 'requestOptIn ERROR $e\n$st');
       return false;
     }
   }
 
   Future<void> _onForeground(RemoteMessage msg) async {
     final n = msg.notification;
-    assert(() {
-      // ignore: avoid_print
-      print('[ChimeBridge] fg push '
-          'title=${n?.title} body=${n?.body} data=${msg.data}');
-      return true;
-    }());
+    diag('ChimeBridge',
+        'FG push received title=${n?.title} body=${n?.body} '
+        'from=${msg.from} msgId=${msg.messageId} '
+        'data=${msg.data}');
     if (n == null) {
       // Data-only push — still look for a URL to feed the WebView.
       _publishUrl(msg);

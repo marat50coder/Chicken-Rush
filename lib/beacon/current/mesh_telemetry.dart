@@ -21,6 +21,7 @@ import 'dart:convert';
 
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 
+import '../../prism/diag.dart';
 import '../../prism/sealed_bytes.dart';
 import '../plan/fabric_plan.dart';
 import 'anchor_vault.dart';
@@ -38,7 +39,12 @@ class MeshTelemetry {
   bool _booted = false;
 
   Future<void> boot() async {
-    if (!fabricCredentialsLive) return;
+    diag('MeshTelemetry',
+        'boot() enter credentialsLive=$fabricCredentialsLive booted=$_booted');
+    if (!fabricCredentialsLive) {
+      diag('MeshTelemetry', 'boot() SKIPPED — gate dormant');
+      return;
+    }
     if (_booted) return;
     _booted = true;
 
@@ -77,46 +83,52 @@ class MeshTelemetry {
     });
     _sdk!.onDeepLinking((DeepLinkResult res) {
       try {
+        diag('MeshTelemetry',
+            'onDeepLinking status=${res.status} '
+            'error=${res.error} '
+            'clickEvent=${jsonEncode(_jsonSafe(res.deepLink?.clickEvent))}');
         final click = res.deepLink?.clickEvent;
         if (click != null && click.isNotEmpty) {
           _deepLinkRaw = Map<String, dynamic>.from(click);
           unawaited(AnchorVault.instance.storeDeepLinkRaw(_deepLinkRaw));
-          assert(() {
-            // ignore: avoid_print
-            print('[MeshTelemetry] deepLink clickEvent keys='
-                '${_deepLinkRaw.keys.toList()}');
-            return true;
-          }());
+          diag('MeshTelemetry',
+              'deepLink keys=${_deepLinkRaw.keys.toList()}');
         }
-      } catch (_) {}
+      } catch (e) {
+        diag('MeshTelemetry', 'onDeepLinking error $e');
+      }
       _resolveDeepLink();
     });
 
+    diag('MeshTelemetry', 'calling initSdk()…');
     try {
-      await _sdk!.initSdk(
+      final res = await _sdk!.initSdk(
         registerConversionDataCallback: true,
         registerOnAppOpenAttributionCallback: true,
         registerOnDeepLinkingCallback: true,
       );
-    } catch (_) {
+      diag('MeshTelemetry', 'initSdk OK → $res');
+    } catch (e, st) {
+      diag('MeshTelemetry', 'initSdk FAILED $e\n$st');
       _resolveInstall();
       _resolveDeepLink();
       return;
     }
     try {
       _afId = await _sdk!.getAppsFlyerUID();
-    } catch (_) {}
+      diag('MeshTelemetry', 'AFID=$_afId');
+    } catch (e) {
+      diag('MeshTelemetry', 'getAppsFlyerUID error $e');
+    }
   }
 
   void _handleInstall(dynamic payload) {
     try {
-      assert(() {
-        // ignore: avoid_print
-        print('[MeshTelemetry] GCD raw=${jsonEncode(_jsonSafe(payload))}');
-        return true;
-      }());
+      diag('MeshTelemetry',
+          'GCD raw=${jsonEncode(_jsonSafe(payload))}');
       final flat = _flatten(payload);
       if (flat.isEmpty) {
+        diag('MeshTelemetry', 'GCD flatten → EMPTY');
         _resolveInstall();
         return;
       }
@@ -134,16 +146,19 @@ class MeshTelemetry {
         gaid:        _s(flat, ['advertising_id', 'gaid', 'android_id']),
       ));
 
-      assert(() {
-        // ignore: avoid_print
-        print('[MeshTelemetry] install status=${flat['af_status']} '
-            'media_source=${flat['media_source']} '
-            'campaign_id=${flat['campaign_id']} '
-            'af_sub1=${flat['af_sub1']}');
-        return true;
-      }());
+      diag('MeshTelemetry',
+          'install parsed status=${flat['af_status']} '
+          'media_source=${flat['media_source']} '
+          'campaign=${flat['campaign']} '
+          'campaign_id=${flat['campaign_id']} '
+          'af_sub1=${flat['af_sub1']} '
+          'af_sub2=${flat['af_sub2']} '
+          'af_sub3=${flat['af_sub3']} '
+          'deep_link_value=${flat['deep_link_value']} '
+          'all_keys=${flat.keys.toList()}');
       _resolveInstall();
-    } catch (_) {
+    } catch (e, st) {
+      diag('MeshTelemetry', '_handleInstall error $e\n$st');
       _resolveInstall();
     }
   }
@@ -237,14 +252,15 @@ class MeshTelemetry {
       merged['af_id'] = _afId;
     }
 
-    assert(() {
-      // ignore: avoid_print
-      print('[MeshTelemetry] awaitBreadcrumbs isFirst=$isFirstLaunch '
-          'mergedKeys=${merged.keys.toList()} '
-          'deep_link_value=${merged['deep_link_value']} '
-          'deep_link_sub1=${merged['deep_link_sub1']}');
-      return true;
-    }());
+    diag('MeshTelemetry',
+        'awaitBreadcrumbs isFirst=$isFirstLaunch '
+        'budget=${budget.inSeconds}s dl=${dlBudget.inSeconds}s '
+        'mergedKeys=${merged.keys.toList()} '
+        'media_source=${merged['media_source']} '
+        'af_status=${merged['af_status']} '
+        'deep_link_value=${merged['deep_link_value']} '
+        'deep_link_sub1=${merged['deep_link_sub1']} '
+        'af_id=${merged['af_id']}');
     return merged;
   }
 

@@ -3,10 +3,13 @@ import 'package:flutter/services.dart';
 
 import 'beacon/current/chime_bridge.dart';
 import 'kernel/kernel_deck.dart';
+import 'prism/diag.dart';
 import 'prism/sealed_bytes.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  diag('Main', 'app start — credentialsReady=$credentialsReady '
+      'bundle=${Sealed.bundleId}');
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   // immersiveSticky hides the status + navigation bars across the whole
   // app (gray-flow stages AND the game). A swipe briefly reveals them,
@@ -27,9 +30,12 @@ Future<void> main() async {
   if (credentialsReady) {
     try {
       await ChimeBridge.instance.boot();
-    } catch (_) {/* dormant */}
+    } catch (e, st) {
+      diag('Main', 'early ChimeBridge.boot error $e\n$st');
+    }
   }
 
+  diag('Main', 'runApp()');
   runApp(const ChickenRushApp());
 }
 

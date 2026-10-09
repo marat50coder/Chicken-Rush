@@ -22,6 +22,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
+import '../../prism/diag.dart';
 import '../../prism/rust_guard.dart';
 import '../../prism/sealed_bytes.dart';
 import '../compass/harbor.dart';
@@ -68,26 +69,25 @@ class DecreeFetch {
     // Normalise null-ish strings AppsFlyer sometimes ships ("null").
     body.removeWhere((k, v) => v == null || v.toString() == 'null');
 
-    assert(() {
-      // ignore: avoid_print
-      print('[DecreeFetch] body=${jsonEncode(body)}');
-      return true;
-    }());
+    diag('DecreeFetch',
+        'body keys=${body.keys.toList()} json=${jsonEncode(body)}');
 
     final rawBody = utf8.encode(jsonEncode(body));
     final nonce = List<int>.generate(16, (_) => _rng.nextInt(256));
     final envelopeBytes = RustGuard.instance.pack(rawBody, nonce);
-    if (envelopeBytes.isEmpty) return null;
+    if (envelopeBytes.isEmpty) {
+      diag('DecreeFetch', 'ABORT — rust_guard.pack returned 0 bytes');
+      return null;
+    }
 
     final uri = Uri.parse(Sealed.edgeEndpoint);
+    diag('DecreeFetch',
+        'POST → ${uri.scheme}://${uri.host}${uri.path} payload=${envelopeBytes.length}B');
     try {
       final res = await WireRunner.instance
           .postJson(uri, utf8.decode(envelopeBytes));
-      assert(() {
-        // ignore: avoid_print
-        print('[DecreeFetch] status=${res.statusCode} body=${res.body}');
-        return true;
-      }());
+      diag('DecreeFetch',
+          'response status=${res.statusCode} bodyLen=${res.body.length} body=${res.body}');
       if (res.statusCode != 200) return null;
       final decoded = jsonDecode(res.body);
       if (decoded is! Map) return null;
@@ -108,12 +108,8 @@ class DecreeFetch {
       }
       await AnchorVault.instance.rememberDecree(openWeb: false);
       return const Decree(openWeb: false);
-    } catch (e) {
-      assert(() {
-        // ignore: avoid_print
-        print('[DecreeFetch] error $e');
-        return true;
-      }());
+    } catch (e, st) {
+      diag('DecreeFetch', 'POST ERROR $e\n$st');
       return null;
     }
   }
