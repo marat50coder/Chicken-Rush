@@ -18,6 +18,7 @@ class ShellCta extends StatefulWidget {
     this.kind = ShellCtaKind.primary,
     this.icon,
     this.minWidth = 220,
+    this.compact = false,
   });
 
   final String label;
@@ -25,6 +26,9 @@ class ShellCta extends StatefulWidget {
   final ShellCtaKind kind;
   final IconData? icon;
   final double minWidth;
+  /// Smaller padding + font. Used on the permission screen so the pair of
+  /// pills doesn't dominate the layout.
+  final bool compact;
 
   @override
   State<ShellCta> createState() => _ShellCtaState();
@@ -40,6 +44,13 @@ class _ShellCtaState extends State<ShellCta> {
     final glow = isPrimary ? ShellPalette.flameLight : ShellPalette.coalLight;
     final txt = isPrimary ? Colors.white : ShellPalette.ink;
 
+    final hPad = widget.compact ? 14.0 : 24.0;
+    final vPad = widget.compact ? 10.0 : 14.0;
+    final fs   = widget.compact ? 14.5 : 17.0;
+    final icSz = widget.compact ? 17.0 : 20.0;
+    final minW = widget.compact ? 0.0  : widget.minWidth;
+    final radius = widget.compact ? 11.0 : 14.0;
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => setState(() => _down = true),
@@ -50,11 +61,11 @@ class _ShellCtaState extends State<ShellCta> {
         scale: _down ? 0.97 : 1,
         duration: const Duration(milliseconds: 90),
         child: Container(
-          constraints: BoxConstraints(minWidth: widget.minWidth),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          constraints: BoxConstraints(minWidth: minW),
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(radius),
             border: isPrimary
                 ? null
                 : Border.all(color: ShellPalette.coalLight, width: 1.5),
@@ -62,8 +73,8 @@ class _ShellCtaState extends State<ShellCta> {
               if (isPrimary)
                 BoxShadow(
                   color: ShellPalette.flameDeep.withValues(alpha: 0.55),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
+                  blurRadius: widget.compact ? 10 : 14,
+                  offset: const Offset(0, 4),
                 ),
             ],
             gradient: isPrimary
@@ -79,14 +90,14 @@ class _ShellCtaState extends State<ShellCta> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (widget.icon != null) ...[
-                Icon(widget.icon, color: txt, size: 20),
-                const SizedBox(width: 8),
+                Icon(widget.icon, color: txt, size: icSz),
+                SizedBox(width: widget.compact ? 6 : 8),
               ],
               Text(
                 widget.label,
                 style: TextStyle(
                   color: txt,
-                  fontSize: 17,
+                  fontSize: fs,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.6,
                 ),

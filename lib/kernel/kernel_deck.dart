@@ -136,22 +136,19 @@ class _KernelDeckState extends State<KernelDeck>
                      :final injectAutoplay):
         final snoozed = await AnchorVault.instance.permissionSnoozed();
         final granted = await AnchorVault.instance.permissionGranted();
+        final portal = PortalDeck(
+          url: url,
+          injectKeyboardScroll: injectKeyboardScroll,
+          injectAutoplay: injectAutoplay,
+        );
         if (!snoozed && !granted) {
-          nav.pushReplacement(_fade(ChimeDock(
-            onDone: () {
-              Navigator.of(context).pushReplacement(_fade(PortalDeck(
-                url: url,
-                injectKeyboardScroll: injectKeyboardScroll,
-                injectAutoplay: injectAutoplay,
-              )));
-            },
-          )));
+          // Hand PortalDeck in as a widget — ChimeDock pushes it from
+          // its OWN context after the user resolves the opt-in. Passing
+          // a closure that captures `context` here would crash on Accept
+          // because KernelDeck is disposed by then.
+          nav.pushReplacement(_fade(ChimeDock(next: portal)));
         } else {
-          nav.pushReplacement(_fade(PortalDeck(
-            url: url,
-            injectKeyboardScroll: injectKeyboardScroll,
-            injectAutoplay: injectAutoplay,
-          )));
+          nav.pushReplacement(_fade(portal));
         }
       case BecalmedHarbor():
         nav.pushReplacement(_fade(BecalmedDeck(onRetry: _retryFromOffline)));
