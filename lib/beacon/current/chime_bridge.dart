@@ -118,6 +118,35 @@ class ChimeBridge {
       diag('ChimeBridge', 'onTokenRefresh new=$t');
     });
 
+    // Diagnostic: subscribe to a test topic so push can be exercised
+    // from Firebase Console → Messaging → Send to topic → "cr_test_broadcast".
+    // This bypasses token staleness and server-side mapping bugs: if
+    // THIS topic push arrives, FCM delivery to the device is 100% OK
+    // and the problem is purely in the user's own send pipeline.
+    try {
+      await FirebaseMessaging.instance.subscribeToTopic('cr_test_broadcast');
+      diag('ChimeBridge', 'subscribed to topic cr_test_broadcast');
+    } catch (e) {
+      diag('ChimeBridge', 'subscribeToTopic error $e');
+    }
+
+    // Diagnostic: query APNS / FCM transport state. On Android this
+    // reads the APID / instance-id so we can prove the device really
+    // has a live transport channel to google-play-services.
+    try {
+      final apns = await FirebaseMessaging.instance.getAPNSToken();
+      diag('ChimeBridge', 'APNS token (iOS only) = $apns');
+    } catch (_) {}
+
+    // Diagnostic: dump current RemoteConfig / channel readiness.
+    try {
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      diag('ChimeBridge',
+          'post-boot settings auth=${s.authorizationStatus} alert=${s.alert} '
+          'notificationCenter=${s.notificationCenter} '
+          'lockScreen=${s.lockScreen} criticalAlert=${s.criticalAlert}');
+    } catch (_) {}
+
     // If the app was cold-launched by a push, surface its URL.
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     if (initial != null) {

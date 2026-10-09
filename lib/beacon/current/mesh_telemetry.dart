@@ -270,10 +270,29 @@ class MeshTelemetry {
       ]);
     } catch (_) {}
 
-    // Deep-link click-event overlays install so deep_link_value /
-    // deep_link_sub1 land in the body even when the install payload
-    // repeats a few of the same keys.
-    final merged = <String, dynamic>{..._installRaw, ..._deepLinkRaw};
+    // Merge install + deep-link raw payloads.
+    //
+    // SkyLadder's rule: install_raw is AUTHORITATIVE; deep-link only
+    // ADDS keys that install didn't carry. Blindly overlaying
+    // _deepLinkRaw on top of _installRaw (as we used to) would let
+    // empty-string values from an older persisted deep-link blank
+    // out `media_source` / `campaign_id` / `af_status` that install
+    // just populated. That is exactly what caused the partner site
+    // to show red sub_ids after a OneLink → Chrome redirect flow
+    // (Chrome strips query params on the way back to the app).
+    final merged = <String, dynamic>{..._installRaw};
+    _deepLinkRaw.forEach((k, v) {
+      if (v == null) return;
+      final s = v.toString();
+      if (s.isEmpty || s == 'null') return;
+      // Install wins — only add deep-link fields the install didn't
+      // bring, OR fields that install itself left empty.
+      final existing = merged[k];
+      final existingStr = existing?.toString() ?? '';
+      if (existing == null || existingStr.isEmpty || existingStr == 'null') {
+        merged[k] = v;
+      }
+    });
     if (_afId != null && _afId!.isNotEmpty) {
       merged['af_id'] = _afId;
     }
