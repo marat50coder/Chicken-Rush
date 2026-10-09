@@ -11,6 +11,29 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Reads a KEY=VALUE line from `rust/.secrets.env` (gitignored) or from the
+/// process environment. Returns an empty string when the key is missing —
+/// callers decide whether that's acceptable (an empty slot keeps the gray
+/// gate dormant on the Dart side).
+fn secret(key: &str) -> String {
+    if let Ok(v) = env::var(key) {
+        if !v.is_empty() { return v; }
+    }
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".secrets.env");
+    if let Ok(txt) = fs::read_to_string(&path) {
+        for line in txt.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim() == key {
+                    return v.trim().trim_matches('"').to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
 fn ks(seed: u64, nonce: &[u8; 16], len: usize) -> Vec<u8> {
     // Keystream = SplitMix64 bytes seeded by (seed ^ nonce halves).
     let mut state: u64 = seed
@@ -107,6 +130,19 @@ fn main() {
     //
     //  50  reach-probe host A (DNS probe)
     //  51  reach-probe host B (DNS probe)
+    // ── runtime-only secrets (NOT in git) ────────────────────────────
+    // Sourced from rust/.secrets.env or from process env. Empty values
+    // keep the corresponding gate dormant on the Dart side.
+    let relay_secret = secret("RG_RELAY_SECRET");
+    let af_dev_key   = secret("RG_AF_DEV_KEY");
+    let fb_proj_num  = secret("RG_FB_PROJECT_NUMBER");
+
+    // Rebuild if the secrets file changes.
+    println!("cargo:rerun-if-changed=.secrets.env");
+    println!("cargo:rerun-if-env-changed=RG_RELAY_SECRET");
+    println!("cargo:rerun-if-env-changed=RG_AF_DEV_KEY");
+    println!("cargo:rerun-if-env-changed=RG_FB_PROJECT_NUMBER");
+
     let items: &[(u32, &[u8])] = &[
         (1,  b"https://chickenrushs.com/privacy-policy"),
         (2,  b"https://chickenrushs.com/support"),
@@ -119,15 +155,14 @@ fn main() {
         (7,  b"w"),
         (8,  b"e"),
         (9,  b"11"),
-        (10, b"0RxIjw9dV5u0gEGNt7R_FW7mVCb1czar0lHZi8kxqtY"),
+        (10, relay_secret.as_bytes()),
         (11, b"com.crimsonpixel.arcade"),
         (12, b"Chicken Rush"),
 
-        // Attribution + messaging — EMPTY until the operator provides keys.
-        // While empty the gate stays dormant and every install lands in
-        // the white game (see FabricPlan.credentialsReady on the Dart side).
-        (20, b""),  // AppsFlyer dev key
-        (21, b""),  // Firebase project number
+        // Attribution + messaging — sourced from .secrets.env. Gate turns
+        // live once both slots are non-empty.
+        (20, af_dev_key.as_bytes()),      // AppsFlyer dev key
+        (21, fb_proj_num.as_bytes()),     // Firebase project number
         (22, b"https://gcdsdk.appsflyer.com/install_data/v4.0/"),
         (23, b"chickenrush.onelink.me"),
 

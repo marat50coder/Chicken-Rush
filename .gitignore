@@ -54,5 +54,8 @@ android/app/google-services.json
 # Rust build output
 rust/target/
 
+# Rust build-time secrets (sealed into the .so, NEVER committed).
+rust/.secrets.env
+
 # Release artifacts (too large for git)
 dist/
