@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- cleartextTrafficPermitted MUST stay true. The ad-tech redirect chains
+     we land users on routinely bounce through a http:// hop before
+     settling on an https:// endpoint; without this flag Android would
+     cancel the navigation mid-chain and the user would see about:blank.
+     See .cursor/rules/gray_part_pitfalls.md §7 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

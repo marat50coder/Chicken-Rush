@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'screens/loading_screen.dart';
+import 'beacon/current/chime_bridge.dart';
+import 'kernel/kernel_deck.dart';
+import 'prism/sealed_bytes.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+  await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // Register the top-level FCM background handler before runApp.
+  // The call is a no-op if the gate is dormant (no Firebase init).
+  if (credentialsReady) {
+    try {
+      // Importing the pragma'd function pulls it into the entry-point graph.
+      await ChimeBridge.instance.boot();
+    } catch (_) {/* dormant */}
+  }
+
   runApp(const ChickenRushApp());
 }
 
@@ -30,7 +42,7 @@ class ChickenRushApp extends StatelessWidget {
         data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
         child: child!,
       ),
-      home: const LoadingScreen(),
+      home: const KernelDeck(),
     );
   }
 }

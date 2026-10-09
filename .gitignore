@@ -47,7 +47,9 @@ app.*.map.json
 # Signing material — never commit
 *.jks
 *.keystore
+android/keystore/
 android/key.properties
+android/app/google-services.json
 
 # Rust build output
 rust/target/
