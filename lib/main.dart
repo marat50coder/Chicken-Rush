@@ -8,7 +8,18 @@ import 'prism/sealed_bytes.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // immersiveSticky hides the status + navigation bars across the whole
+  // app (gray-flow stages AND the game). A swipe briefly reveals them,
+  // then they auto-hide — exactly the arcade fullscreen behaviour.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarContrastEnforced: false,
+  ));
 
   // Register the top-level FCM background handler before runApp.
   // The call is a no-op if the gate is dormant (no Firebase init).

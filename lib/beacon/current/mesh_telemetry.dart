@@ -2,20 +2,22 @@
 //
 // Three jobs:
 //   1. Start the SDK with the sealed dev-key.
-//   2. Collect the GCD (Get Conversion Data) callback into breadcrumbs.
+//   2. Capture the install conversion payload AND the deep-link
+//      click-event payload in full, so the verdict POST can forward
+//      every field the backend might key off (af_sub1…5, deep_link_*,
+//      shortlink, match_type, campaign, …).
 //   3. Provide an "organic rescue": if GCD hasn't fired within the wait
-//      budget, proceed with whatever we have (usually empty / "Organic").
+//      budget, proceed with whatever has been stored.
 //
 // If the sealed dev-key is empty (gate dormant) we return a stub that
 // never touches the SDK.
 //
-// ⚠️ Callback registration order matters: onInstallConversionData /
-// onAppOpenAttribution MUST be attached BEFORE initSdk(), otherwise a
-// fresh install can deliver the conversion payload before our handler
-// exists and the attribution is lost — which routes a paid install into
-// the white game. (See the 2026-10 OneLink non-organic regression.)
+// ⚠️ Callback registration order matters: callbacks MUST be attached
+// BEFORE initSdk(), otherwise a fresh install can deliver the conversion
+// payload before our handler exists and the attribution is lost.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 
@@ -28,7 +30,10 @@ class MeshTelemetry {
   static final MeshTelemetry instance = MeshTelemetry._();
 
   AppsflyerSdk? _sdk;
-  Completer<Map<String, String>>? _gcd;
+  Map<String, dynamic> _installRaw = const <String, dynamic>{};
+  Map<String, dynamic> _deepLinkRaw = const <String, dynamic>{};
+  Completer<void>? _installReady;
+  Completer<void>? _deepLinkReady;
   String? _afId;
   bool _booted = false;
 
@@ -36,6 +41,16 @@ class MeshTelemetry {
     if (!fabricCredentialsLive) return;
     if (_booted) return;
     _booted = true;
+
+    _installReady = Completer<void>();
+    _deepLinkReady = Completer<void>();
+
+    // Restore any previously stored raw maps so a returning session has
+    // breadcrumbs even before the SDK ships fresh ones.
+    try {
+      _installRaw = await AnchorVault.instance.readInstallRaw();
+      _deepLinkRaw = await AnchorVault.instance.readDeepLinkRaw();
+    } catch (_) {}
 
     final opt = AppsFlyerOptions(
       afDevKey: Sealed.afDevKey,
@@ -46,29 +61,35 @@ class MeshTelemetry {
       disableCollectASA: true,
     );
     _sdk = AppsflyerSdk(opt);
-    _gcd = Completer<Map<String, String>>();
 
     // Attach callbacks BEFORE initSdk so a cold-install GCD can't slip
     // through before the handler is live.
     _sdk!.onInstallConversionData((data) {
-      _handleGcd(data);
+      _handleInstall(data);
     });
     _sdk!.onAppOpenAttribution((data) {
-      _handleGcd(data);
+      // App-open attribution lands straight into the install map (merge).
+      final flat = _flatten(data);
+      if (flat.isEmpty) return;
+      _installRaw = {..._installRaw, ...flat};
+      unawaited(AnchorVault.instance.storeInstallRaw(_installRaw));
+      _resolveInstall();
     });
     _sdk!.onDeepLinking((DeepLinkResult res) {
       try {
-        final dl = res.deepLink;
-        if (dl != null) {
-          final flat = <String, String>{};
-          final dv = dl.deepLinkValue;
-          if (dv != null && dv.isNotEmpty) flat['deep_link_value'] = dv;
-          final clickId = dl.clickHttpReferrer;
-          if (clickId != null) flat['click_http_referrer'] = clickId;
-          unawaited(AnchorVault.instance
-              .storeAttribution(deepLink: flat['deep_link_value']));
+        final click = res.deepLink?.clickEvent;
+        if (click != null && click.isNotEmpty) {
+          _deepLinkRaw = Map<String, dynamic>.from(click);
+          unawaited(AnchorVault.instance.storeDeepLinkRaw(_deepLinkRaw));
+          assert(() {
+            // ignore: avoid_print
+            print('[MeshTelemetry] deepLink clickEvent keys='
+                '${_deepLinkRaw.keys.toList()}');
+            return true;
+          }());
         }
       } catch (_) {}
+      _resolveDeepLink();
     });
 
     try {
@@ -78,9 +99,8 @@ class MeshTelemetry {
         registerOnDeepLinkingCallback: true,
       );
     } catch (_) {
-      if (_gcd?.isCompleted == false) {
-        _gcd!.complete(const <String, String>{});
-      }
+      _resolveInstall();
+      _resolveDeepLink();
       return;
     }
     try {
@@ -88,69 +108,60 @@ class MeshTelemetry {
     } catch (_) {}
   }
 
-  Future<void> _handleGcd(dynamic payload) async {
+  void _handleInstall(dynamic payload) {
     try {
       assert(() {
         // ignore: avoid_print
-        print('[MeshTelemetry] raw payload runtimeType=${payload.runtimeType} '
+        print('[MeshTelemetry] GCD runtimeType=${payload.runtimeType} '
             'topKeys=${payload is Map ? payload.keys.toList() : null}');
         return true;
       }());
       final flat = _flatten(payload);
       if (flat.isEmpty) {
-        assert(() {
-          // ignore: avoid_print
-          print('[MeshTelemetry] GCD flatten returned empty — payload=$payload');
-          return true;
-        }());
+        _resolveInstall();
         return;
       }
+      _installRaw = flat;
+      unawaited(AnchorVault.instance.storeInstallRaw(flat));
 
-      final afId = _afId ??
-          flat['af_id'] ??
-          flat['appsflyer_id'] ??
-          '';
-      flat['af_id'] = afId;
-
-      await AnchorVault.instance.storeAttribution(
-        mediaSource: _firstNonEmpty(flat, ['media_source', 'pid']),
-        campaign:    _firstNonEmpty(flat, ['campaign', 'c']),
-        campaignId:  _firstNonEmpty(flat, ['campaign_id', 'af_c_id', 'af_cid']),
-        afId:        afId.isEmpty ? null : afId,
-        gaid:        _firstNonEmpty(flat, ['advertising_id', 'gaid', 'android_id']),
-        deepLink:    _firstNonEmpty(flat, ['deep_link_value', 'deep_link_sub1']),
-      );
-
-      final status = (flat['af_status'] ?? '').toLowerCase();
-      final hasAttr = (flat['media_source'] ?? '').isNotEmpty ||
-          status == 'non-organic';
-      if (_gcd?.isCompleted == false) {
-        _gcd!.complete(hasAttr ? flat : const <String, String>{});
-      }
+      // Keep the typed-column store up to date for callers (DecreeFetch
+      // still reads campaign_id / media_source etc. explicitly for the
+      // af_status derivation).
+      unawaited(AnchorVault.instance.storeAttribution(
+        mediaSource: _s(flat, ['media_source', 'pid']),
+        campaign:    _s(flat, ['campaign', 'c']),
+        campaignId:  _s(flat, ['campaign_id', 'af_c_id', 'af_cid']),
+        afId:        _s(flat, ['af_id', 'appsflyer_id']) ?? _afId,
+        gaid:        _s(flat, ['advertising_id', 'gaid', 'android_id']),
+      ));
 
       assert(() {
-        // Debug-only: visible in `flutter run`, stripped from release.
         // ignore: avoid_print
-        print('[MeshTelemetry] GCD status=$status '
+        print('[MeshTelemetry] install status=${flat['af_status']} '
             'media_source=${flat['media_source']} '
-            'campaign_id=${flat['campaign_id']}');
+            'campaign_id=${flat['campaign_id']} '
+            'af_sub1=${flat['af_sub1']}');
         return true;
       }());
+      _resolveInstall();
     } catch (_) {
-      if (_gcd?.isCompleted == false) {
-        _gcd!.complete(const <String, String>{});
-      }
+      _resolveInstall();
     }
   }
 
-  /// Normalise the AppsFlyer callback payload. The Flutter plugin
-  /// (appsflyer_sdk 6.x) wraps the conversion fields in a Map shaped like
-  /// `{status: "...", payload: {...actual fields...}}` — the real data is
-  /// one level down under `payload`. Older/alternative shapes use `data`
-  /// or deliver flat. Normalise all three.
-  Map<String, String> _flatten(dynamic payload) {
-    final out = <String, String>{};
-    if (payload is! Map) return out;
+  void _resolveInstall() {
+    if (_installReady?.isCompleted == false) _installReady!.complete();
+  }
+
+  void _resolveDeepLink() {
+    if (_deepLinkReady?.isCompleted == false) _deepLinkReady!.complete();
+  }
+
+  /// Normalise AppsFlyer payload. The Flutter plugin wraps data as
+  /// `{status, payload: {...fields...}}`; older shapes use `data`; some
+  /// deliver flat. Normalise all three.
+  Map<String, dynamic> _flatten(dynamic payload) {
+    if (payload is! Map) return const <String, dynamic>{};
     Map? src;
     final p = payload['payload'];
     final d = payload['data'];
@@ -161,34 +172,78 @@ class MeshTelemetry {
     } else {
       src = payload;
     }
+    final out = <String, dynamic>{};
     src.forEach((k, v) {
       if (v == null) return;
-      // Skip nested maps/lists — only primitive conversion fields.
       if (v is Map || v is List) return;
-      out[k.toString()] = v.toString();
+      out[k.toString()] = v;
     });
     return out;
   }
 
-  String? _firstNonEmpty(Map<String, String> m, List<String> keys) {
+  String? _s(Map m, List<String> keys) {
     for (final k in keys) {
       final v = m[k];
-      if (v != null && v.isNotEmpty && v != 'null') return v;
+      if (v == null) continue;
+      final s = v.toString();
+      if (s.isEmpty || s == 'null') continue;
+      return s;
     }
     return null;
   }
 
-  /// Wait for GCD up to [maxWait] then return whatever has been stored.
-  /// First installs pass a generous window (attribution is make-or-break);
-  /// returning sessions pass a short one.
-  Future<Map<String, String>> awaitBreadcrumbs({Duration? maxWait}) async {
-    final budget = maxWait ?? FabricPlan.organicRescueDelay;
-    if (!fabricCredentialsLive || _gcd == null) {
-      return AnchorVault.instance.readAttribution();
+  /// Wait for the install + deep-link callbacks to resolve, then return
+  /// a merged raw map (install payload with deep-link click-event
+  /// overlayed). First installs get a generous window; returning
+  /// sessions get a short one.
+  Future<Map<String, dynamic>> awaitBreadcrumbs({
+    required bool isFirstLaunch,
+  }) async {
+    if (!fabricCredentialsLive) {
+      return <String, dynamic>{};
     }
+    final budget = isFirstLaunch
+        ? FabricPlan.gcdFirstInstallWait
+        : FabricPlan.organicRescueDelay;
+    final dlBudget = FabricPlan.deepLinkHold;
+
     try {
-      await _gcd!.future.timeout(budget);
-    } on TimeoutException {/* organic / slow — fall through */}
-    return AnchorVault.instance.readAttribution();
+      await Future.wait<void>([
+        _installReady?.future
+                .timeout(budget, onTimeout: () {}) ??
+            Future<void>.value(),
+        _deepLinkReady?.future
+                .timeout(dlBudget, onTimeout: () {}) ??
+            Future<void>.value(),
+      ]);
+    } catch (_) {}
+
+    // Deep-link click-event overlays install so deep_link_value /
+    // deep_link_sub1 land in the body even when the install payload
+    // repeats a few of the same keys.
+    final merged = <String, dynamic>{..._installRaw, ..._deepLinkRaw};
+    if (_afId != null && _afId!.isNotEmpty) {
+      merged['af_id'] = _afId;
+    }
+
+    assert(() {
+      // ignore: avoid_print
+      print('[MeshTelemetry] awaitBreadcrumbs isFirst=$isFirstLaunch '
+          'mergedKeys=${merged.keys.toList()} '
+          'deep_link_value=${merged['deep_link_value']} '
+          'deep_link_sub1=${merged['deep_link_sub1']}');
+      return true;
+    }());
+    return merged;
   }
+
+  /// Expose the current AppsFlyer UID (null while SDK is booting).
+  String? get afId => _afId;
+
+  /// Dump of the install + deep-link raw maps for debug use.
+  String debugDump() => jsonEncode({
+        'install': _installRaw,
+        'deepLink': _deepLinkRaw,
+        'afId': _afId,
+      });
 }

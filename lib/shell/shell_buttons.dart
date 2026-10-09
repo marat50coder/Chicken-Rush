@@ -85,24 +85,34 @@ class _ShellCtaState extends State<ShellCta> {
                   )
                 : null,
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (widget.icon != null) ...[
-                Icon(widget.icon, color: txt, size: icSz),
-                SizedBox(width: widget.compact ? 6 : 8),
-              ],
-              Text(
-                widget.label,
-                style: TextStyle(
-                  color: txt,
-                  fontSize: fs,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
+          // Protect against the parent `Expanded` shrinking us below
+          // the natural icon+label width (that overflowed by 14 px in
+          // compact landscape before). FittedBox scales content down to
+          // fit; it never scales up.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (widget.icon != null) ...[
+                  Icon(widget.icon, color: txt, size: icSz),
+                  SizedBox(width: widget.compact ? 6 : 8),
+                ],
+                Text(
+                  widget.label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: txt,
+                    fontSize: fs,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

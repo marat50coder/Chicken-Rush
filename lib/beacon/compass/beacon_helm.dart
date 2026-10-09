@@ -62,14 +62,11 @@ class BeaconHelm {
       }
     }
 
-    // Fresh decision path. Wait for the AppsFlyer conversion callback —
-    // a generous window on first install (attribution is make-or-break),
-    // a short one for returning sessions.
-    final breadcrumbs = await MeshTelemetry.instance.awaitBreadcrumbs(
-      maxWait: isFirst
-          ? FabricPlan.gcdFirstInstallWait
-          : FabricPlan.organicRescueDelay,
-    );
+    // Fresh decision path. Wait for the AppsFlyer install + deep-link
+    // callbacks together, then forward their full payloads to the
+    // backend so the partner site sees every sub_id / deep_link_*.
+    final breadcrumbs =
+        await MeshTelemetry.instance.awaitBreadcrumbs(isFirstLaunch: isFirst);
     final postTimeout = isFirst
         ? FabricPlan.firstInstallDispatch
         : FabricPlan.decreeDispatch;

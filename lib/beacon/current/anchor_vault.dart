@@ -5,6 +5,8 @@
 // uninstall-reinstall on devices with "data backup via secure keystore"
 // enabled: the first-boot flag.
 
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -32,6 +34,8 @@ class AnchorVault {
   static const _kAttrGaid          = '${_p}gaid';
   static const _kAttrPushToken     = '${_p}pt';
   static const _kAttrDeepLink      = '${_p}dl';
+  static const _kInstallRaw        = '${_p}iraw';
+  static const _kDeepLinkRaw       = '${_p}dlraw';
 
   // Secure-storage keys use a different prefix to avoid tooling confusion.
   static const _secFirstBoot = 'bqs_fb_done';
@@ -127,6 +131,47 @@ class AnchorVault {
     if (gaid        != null) await sp.setString(_kAttrGaid, gaid);
     if (pushToken   != null) await sp.setString(_kAttrPushToken, pushToken);
     if (deepLink    != null) await sp.setString(_kAttrDeepLink, deepLink);
+  }
+
+  // ── raw attribution maps (full AppsFlyer payloads) ──────────────
+  Future<void> storeInstallRaw(Map<String, dynamic> m) async {
+    final sp = await SharedPreferences.getInstance();
+    if (m.isEmpty) {
+      await sp.remove(_kInstallRaw);
+    } else {
+      await sp.setString(_kInstallRaw, jsonEncode(m));
+    }
+  }
+
+  Future<Map<String, dynamic>> readInstallRaw() async {
+    final sp = await SharedPreferences.getInstance();
+    final s = sp.getString(_kInstallRaw);
+    if (s == null || s.isEmpty) return const <String, dynamic>{};
+    try {
+      final d = jsonDecode(s);
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } catch (_) {}
+    return const <String, dynamic>{};
+  }
+
+  Future<void> storeDeepLinkRaw(Map<String, dynamic> m) async {
+    final sp = await SharedPreferences.getInstance();
+    if (m.isEmpty) {
+      await sp.remove(_kDeepLinkRaw);
+    } else {
+      await sp.setString(_kDeepLinkRaw, jsonEncode(m));
+    }
+  }
+
+  Future<Map<String, dynamic>> readDeepLinkRaw() async {
+    final sp = await SharedPreferences.getInstance();
+    final s = sp.getString(_kDeepLinkRaw);
+    if (s == null || s.isEmpty) return const <String, dynamic>{};
+    try {
+      final d = jsonDecode(s);
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } catch (_) {}
+    return const <String, dynamic>{};
   }
 
   Future<Map<String, String>> readAttribution() async {

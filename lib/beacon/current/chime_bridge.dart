@@ -32,9 +32,11 @@ class ChimeBridge {
 
   final _local = FlutterLocalNotificationsPlugin();
   bool _ready = false;
+  String? _lastToken;
   final _urlPulse = StreamController<String>.broadcast();
 
   Stream<String> get pushUrls => _urlPulse.stream;
+  String? get lastToken => _lastToken;
 
   Future<void> boot() async {
     if (!fabricCredentialsLive) return;
@@ -67,9 +69,26 @@ class ChimeBridge {
     try {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
+        _lastToken = token;
         await AnchorVault.instance.storeAttribution(pushToken: token);
+        assert(() {
+          // ignore: avoid_print
+          print('[ChimeBridge] fcm token=${token.substring(0,
+              token.length < 24 ? token.length : 24)}…');
+          return true;
+        }());
       }
-    } catch (_) {}
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[ChimeBridge] getToken error $e');
+        return true;
+      }());
+    }
+    FirebaseMessaging.instance.onTokenRefresh.listen((t) async {
+      _lastToken = t;
+      await AnchorVault.instance.storeAttribution(pushToken: t);
+    });
 
     // If the app was cold-launched by a push, surface its URL.
     final initial = await FirebaseMessaging.instance.getInitialMessage();
@@ -94,26 +113,34 @@ class ChimeBridge {
   }
 
   Future<void> _onForeground(RemoteMessage msg) async {
-    final title = msg.notification?.title ?? 'Chicken Rush';
-    final body  = msg.notification?.body  ?? '';
-    final payload = jsonEncode(msg.data);
+    final n = msg.notification;
+    assert(() {
+      // ignore: avoid_print
+      print('[ChimeBridge] fg push '
+          'title=${n?.title} body=${n?.body} data=${msg.data}');
+      return true;
+    }());
+    if (n == null) {
+      // Data-only push — still look for a URL to feed the WebView.
+      _publishUrl(msg);
+      return;
+    }
+    final android = AndroidNotificationDetails(
+      FabricPlan.notifChannelId,
+      FabricPlan.notifChannelName,
+      channelDescription: FabricPlan.notifChannelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: 'ic_notification',
+      styleInformation: (n.body ?? '').length > 48
+          ? BigTextStyleInformation(n.body ?? '') : null,
+    );
     await _local.show(
-      msg.hashCode & 0x7FFFFFFF,
-      title,
-      body,
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          FabricPlan.notifChannelId,
-          FabricPlan.notifChannelName,
-          channelDescription: FabricPlan.notifChannelDesc,
-          importance: Importance.high,
-          priority: Priority.high,
-          icon: 'ic_notification',
-          styleInformation: body.length > 48
-              ? BigTextStyleInformation(body) : null,
-        ),
-      ),
-      payload: payload,
+      n.hashCode & 0x7FFFFFFF,
+      n.title ?? 'Chicken Rush',
+      n.body ?? '',
+      NotificationDetails(android: android),
+      payload: msg.data.isNotEmpty ? jsonEncode(msg.data) : null,
     );
     _publishUrl(msg);
   }

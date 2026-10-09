@@ -71,6 +71,12 @@ class _ChimeDockState extends State<ChimeDock> {
         ? AppAssets.notificationsHorizontal
         : AppAssets.notificationsVertical;
 
+    // Landscape → compact pills, trimmed 20% each side (0.6 width).
+    // Portrait  → full-size pills, closer to the original look (0.9).
+    final compact = landscape;
+    final widthFactor = landscape ? 0.6 : 0.9;
+    final gap = landscape ? 10.0 : 14.0;
+
     return Scaffold(
       backgroundColor: ShellPalette.backdrop,
       body: Stack(
@@ -84,27 +90,25 @@ class _ChimeDockState extends State<ChimeDock> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  // Row trimmed 20% on each side — 60% of the available
-                  // SafeArea width, centred.
                   Center(
                     child: FractionallySizedBox(
-                      widthFactor: 0.6,
+                      widthFactor: widthFactor,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Expanded(
                             child: ShellCta(
                               label: 'Accept',
-                              compact: true,
+                              compact: compact,
                               icon: Icons.notifications_active_rounded,
                               onTap: _accept,
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          SizedBox(width: gap),
                           Expanded(
                             child: ShellCta(
                               label: 'Skip',
-                              compact: true,
+                              compact: compact,
                               kind: ShellCtaKind.secondary,
                               onTap: _skip,
                             ),
@@ -113,7 +117,7 @@ class _ChimeDockState extends State<ChimeDock> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  SizedBox(height: landscape ? 18 : 24),
                 ],
               ),
             ),
